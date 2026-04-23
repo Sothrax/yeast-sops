@@ -1,0 +1,16 @@
+# Test data — real invoices with PII/GDPR, nepatří do commitu
+test_data/**/*.pdf
+test_data/**/*.jpg
+test_data/**/*.jpeg
+test_data/**/*.png
+test_data/**/*.tiff
+test_data/**/*.heic
+test_data/**/*.out.json
+test_data/_docint_out/_summary.json
+test_data/_docint_out/_classifier_results.json
+
+# _expected.json je OK (jen verdict mapping, žádné PII) — explicitně ne-ignore
+# (default je ne-ignore, jen kdyby sem někdo přidal "test_data/" catch-all)
+
+# macOS
+.DS_Store
