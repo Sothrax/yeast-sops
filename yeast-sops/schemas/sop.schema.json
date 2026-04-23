@@ -1,0 +1,203 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Sothrax/yeast-sops/schemas/sop.schema.json",
+  "title": "SOP Frontmatter Schema",
+  "description": "Schema for YAML frontmatter of SOP markdown files",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "version",
+    "status",
+    "owner",
+    "domain",
+    "tenant",
+    "automation_level",
+    "trigger",
+    "criticality"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^SOP-(ACC|HR|LEG|OPS|IT|FIN)-(T|I)[0-9]{3}$",
+      "description": "Unique SOP identifier. Format: SOP-<DOMAIN>-<T|I><NNN>. T=template, I=instance."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 120,
+      "description": "Human-readable name, Czech or English"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "active", "deprecated", "archived"]
+    },
+    "owner": {
+      "type": "string",
+      "format": "email",
+      "description": "Primary person responsible for this SOP"
+    },
+    "business_owner": {
+      "type": "string",
+      "format": "email",
+      "description": "Business stakeholder (may differ from technical owner)"
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["accounting", "hr", "legal", "it-ops", "finance", "operations"]
+    },
+    "tenant": {
+      "type": "object",
+      "required": ["type"],
+      "oneOf": [
+        {
+          "properties": {
+            "type": { "const": "template" },
+            "parameterized": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Parameter placeholders for instantiation"
+            }
+          },
+          "required": ["type"]
+        },
+        {
+          "properties": {
+            "type": { "const": "instance" },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "yeast-holding",
+                "pq-group",
+                "taf-estate",
+                "ave-medical"
+              ]
+            },
+            "derived_from": {
+              "type": "string",
+              "pattern": "^SOP-(ACC|HR|LEG|OPS|IT|FIN)-T[0-9]{3}$",
+              "description": "Template SOP ID this instance derives from"
+            },
+            "parameter_values": {
+              "type": "object",
+              "description": "Values for template parameters"
+            }
+          },
+          "required": ["type", "scope", "derived_from"]
+        }
+      ]
+    },
+    "last_reviewed": {
+      "type": "string",
+      "format": "date"
+    },
+    "reviewed_by": {
+      "type": "string",
+      "format": "email"
+    },
+    "next_review": {
+      "type": "string",
+      "format": "date",
+      "description": "Date by which this SOP must be re-reviewed"
+    },
+    "agent_suitable": {
+      "type": "boolean",
+      "description": "Whether this process is suitable for agent automation"
+    },
+    "automation_level": {
+      "type": "string",
+      "enum": ["manual", "assisted", "supervised", "autonomous"],
+      "description": "manual=human only, assisted=human drives with AI help, supervised=AI drives with human approval gates, autonomous=AI end-to-end"
+    },
+    "required_tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(mcp|internal|external):[a-z0-9-]+$"
+      },
+      "description": "Tools the process needs. Format: mcp:name, internal:name, external:name"
+    },
+    "required_connectors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(read|write|delete|notify|execute):[a-z0-9_]+$"
+      }
+    },
+    "trigger": {
+      "type": "string",
+      "enum": ["manual", "scheduled", "event", "webhook"]
+    },
+    "schedule": {
+      "type": "string",
+      "description": "Cron expression, required if trigger=scheduled"
+    },
+    "estimated_duration_min": {
+      "type": "number",
+      "minimum": 0
+    },
+    "criticality": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "human_approval_required": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Named conditions that halt the process and require human approval"
+    },
+    "success_criteria": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Machine-verifiable conditions for successful completion"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "related_sops": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^SOP-(ACC|HR|LEG|OPS|IT|FIN)-(T|I)[0-9]{3}$"
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string" },
+          "url": { "type": "string", "format": "uri" }
+        },
+        "required": ["label", "url"]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "trigger": { "const": "scheduled" } }
+      },
+      "then": {
+        "required": ["schedule"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "agent_suitable": { "const": true } }
+      },
+      "then": {
+        "required": ["required_tools", "required_permissions", "success_criteria"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Sothrax/yeast-sops/schemas/role.schema.json",
+  "title": "Role Definition Schema",
+  "description": "A role bundles SOPs together with permissions and context. Used to spin up Cortex agents or Claude Code / Cowork configurations.",
+  "type": "object",
+  "required": ["id", "name", "version", "domain", "sops"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^ROLE-[A-Z]+-[0-9]{3}$",
+      "description": "Format: ROLE-<DOMAIN>-<NNN>"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 3
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["accounting", "hr", "legal", "it-ops", "finance", "operations"]
+    },
+    "seniority": {
+      "type": "string",
+      "enum": ["junior", "senior", "lead", "manager"]
+    },
+    "tenant_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "yeast-holding",
+          "pq-group",
+          "taf-estate",
+          "ave-medical",
+          "all"
+        ]
+      },
+      "description": "Which tenants this role is authorized to operate on"
+    },
+    "sops": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sop_id", "required"],
+        "properties": {
+          "sop_id": {
+            "type": "string",
+            "pattern": "^SOP-(ACC|HR|LEG|OPS|IT|FIN)-(T|I)[0-9]{3}$"
+          },
+          "required": {
+            "type": "boolean",
+            "description": "If true, role cannot function without this SOP"
+          },
+          "frequency": {
+            "type": "string",
+            "enum": ["daily", "weekly", "monthly", "quarterly", "ad-hoc"]
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(read|write|delete|notify|execute):[a-z0-9_]+$"
+      },
+      "description": "Union of permissions from all SOPs, with any additional role-level permissions"
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(mcp|internal|external):[a-z0-9-]+$"
+      }
+    },
+    "escalation_path": {
+      "type": "object",
+      "properties": {
+        "on_error": {
+          "type": "string",
+          "format": "email"
+        },
+        "on_approval_needed": {
+          "type": "string",
+          "format": "email"
+        },
+        "notification_channel": {
+          "type": "string",
+          "description": "e.g. slack:#accounting-alerts"
+        }
+      }
+    },
+    "deployment_target": {
+      "type": "string",
+      "enum": ["claude-code", "cowork", "cortex-agent", "manual"],
+      "description": "Where this role runs"
+    },
+    "claude_constitution_ref": {
+      "type": "string",
+      "description": "Path or URL to CLAUDE.md / constitution file governing this role"
+    }
+  }
+}

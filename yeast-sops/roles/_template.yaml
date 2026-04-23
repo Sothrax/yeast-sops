@@ -1,0 +1,46 @@
+# Role Template
+# =============
+# Bundle of SOPs + permissions that defines a functional role.
+# Used as source for Cortex agent deployment or Claude Code / Cowork configuration.
+
+id: ROLE-XXX-NNN
+name: "Role Name"
+version: 0.1.0
+description: >
+  Stručný popis role, co dělá a proč existuje.
+
+domain: accounting    # accounting | hr | legal | it-ops | finance | operations
+seniority: junior     # junior | senior | lead | manager
+
+tenant_scope:
+  - all    # or specific list: yeast-holding, pq-group, taf-estate, ave-medical
+
+# SOPs this role executes
+sops:
+  - sop_id: SOP-ACC-T001
+    required: true
+    frequency: daily
+  # - sop_id: SOP-ACC-T002
+  #   required: false
+  #   frequency: weekly
+
+# Union of permissions needed (usually derived from SOPs, extended if needed)
+permissions:
+  - read:bank_statements
+  - write:flexibee_transactions
+
+# Tools the role needs
+tools:
+  - mcp:flexibee
+  - internal:bank-sync-service
+
+escalation_path:
+  on_error: petr@yeast-group.cz
+  on_approval_needed: petr@yeast-group.cz
+  notification_channel: "slack:#accounting-alerts"
+
+# Where this role actually runs
+deployment_target: cortex-agent    # claude-code | cowork | cortex-agent | manual
+
+# Reference to constitution / system prompt governing this role
+claude_constitution_ref: "constitutions/accountant-junior.md"

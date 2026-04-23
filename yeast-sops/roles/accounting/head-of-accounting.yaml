@@ -1,0 +1,45 @@
+# Head of Accounting
+# ==================
+# Senior role with oversight of all accounting SOPs.
+# Can override HITL gates with audit justification.
+
+id: ROLE-ACC-003
+name: "Head of Accounting"
+version: 0.1.0
+description: >
+  Senior účetní role s dohledem nad všemi účetními procesy.
+  Může overridovat HITL brány s auditním zdůvodněním, modifikovat templates,
+  a schvalovat onboarding nových klientů.
+
+domain: accounting
+seniority: manager
+
+tenant_scope:
+  - all
+
+sops:
+  - sop_id: SOP-ACC-T001
+    required: true
+    frequency: daily
+
+permissions:
+  - read:bank_statements
+  - read:flexibee_transactions
+  - write:flexibee_transactions
+  - write:flexibee_counterparties
+  - notify:slack
+  - execute:override_hitl_gates
+  - execute:approve_new_counterparty
+
+tools:
+  - mcp:flexibee
+  - internal:bank-sync-service
+
+escalation_path:
+  on_error: petr@yeast-group.cz
+  on_approval_needed: petr@yeast-group.cz
+  notification_channel: "slack:#accounting-alerts"
+
+deployment_target: manual
+
+claude_constitution_ref: "constitutions/head-of-accounting.md"

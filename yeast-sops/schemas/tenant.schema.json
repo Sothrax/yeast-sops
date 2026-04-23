@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Sothrax/yeast-sops/schemas/tenant.schema.json",
+  "title": "Tenant Registry Schema",
+  "description": "Metadata about a tenant (YEAST entity or client) for which SOPs are instantiated",
+  "type": "object",
+  "required": ["slug", "legal_name", "type"],
+  "properties": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+      "description": "Kebab-case identifier used in paths and references"
+    },
+    "legal_name": {
+      "type": "string"
+    },
+    "ico": {
+      "type": "string",
+      "pattern": "^[0-9]{8}$"
+    },
+    "dic": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["yeast-internal", "client"]
+    },
+    "flexibee_company_code": {
+      "type": "string",
+      "description": "FlexiBee dbNazev identifier"
+    },
+    "primary_contact": {
+      "type": "string",
+      "format": "email"
+    },
+    "notification_channel": {
+      "type": "string"
+    },
+    "active_since": {
+      "type": "string",
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "onboarding", "offboarding", "archived"]
+    }
+  }
+}
