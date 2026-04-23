@@ -21,10 +21,17 @@ pro `/sop:*` workflow.
 - **Update changelog** v body SOPky při každé netriviální změně.
 - **Update `last_reviewed` a `reviewed_by`** pokud jsi proces skutečně projel s ownerem.
   Neměň tato pole sám od sebe jen proto, že jsi upravil formulaci.
+- **Secrets řeš přes 1Password Connect.** Všechny credentials / API keys / tokeny
+  žijí ve vaultu `cortex-prod-core`, v SOPkách se na ně odkazuje `op://` URI. Sensitive
+  config (endpointy, IDs) bundlni do stejného 1P itemu; non-sensitive operační knobs
+  (intervaly, thresholds) patří do Supabase `sop_config`. Postupuj podle
+  `docs/secrets-conventions.md` a checklistu tam uvedeného před každým mergem.
 
 ### Nikdy
 
-- **Nevkládej secrets** (credentials, API keys, osobní údaje) do SOPek.
+- **Nevkládej secrets** (credentials, API keys, tokeny, osobní údaje) do SOPek ani do
+  gitu. Žádné `.env` s produkčními hodnotami, žádné hardcoded klíče, žádné hodnoty
+  v commit historii. Reference přes `op://` URI — viz `docs/secrets-conventions.md`.
 - **Needituj schema** (`schemas/*.json`) bez explicitního požadavku a diskuse o dopadu
   na existující SOPky.
 - **Negeneruj instance SOPky ručním copy-paste.** Používej `scripts/instantiate.py`.
@@ -60,10 +67,16 @@ pro `/sop:*` workflow.
 
 ## Jak Claude interaguje s dalšími tooly v tomto repu
 
-- **validate.py** — spouští se přes bash, výstup se parsuje pro errors
-- **instantiate.py** — Claude ho volá, když uživatel chce vytvořit instanci
+- **validate.py** — spouští se přes bash, výstup se parsuje pro errors.
+  Flagy: `--sop <id>`, `--role <id>`, `--strict`, `--stale` (inline warning o overdue SOPkách
+  vedle schema chyb).
+- **instantiate.py** — Claude ho volá, když uživatel chce vytvořit instanci.
 - **to_agent.py** — Claude ho volá pro export do Cortex, ale výsledek ukáže uživateli
-  před commitem (může vyžadovat manuální úpravy)
+  před commitem (může vyžadovat manuální úpravy).
+- **stale_check.py** — samostatný report overdue + upcoming reviews. Nadstavba nad
+  `validate.py --stale`: forward-looking window (default 30 dní, 14 pro `critical`),
+  severity, markdown output (`--format md`), CI exit code 1 pro overdue. Používej pro
+  periodické cadence reporty (monthly/weekly), ne pro pre-commit validaci.
 
 ## Tone of voice
 

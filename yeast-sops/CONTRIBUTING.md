@@ -68,7 +68,11 @@ nemusel umět `git log`.
 
 ## Co do repa NEpatří
 
-- **Secrets** (credentials, API keys) — nikdy. Jsou v Vault / sops-age.
+- **Secrets** (credentials, API keys, tokeny, hesla) — nikdy. Žijí v **1Password
+  Connect**, vault `cortex-prod-core`. V SOPkách se referencují přes `op://` URI
+  scheme. Sensitive config (endpointy, IDs) patří do stejného 1P itemu jako secret;
+  non-sensitive operační knobs jdou do Supabase `sop_config` tabulky. Detaily a
+  checklist před mergem: [`docs/secrets-conventions.md`](docs/secrets-conventions.md).
 - **Osobní data** konkrétních zaměstnanců / klientů (jména, čísla účtů) — pokud to není
   tenant-specific instance, kde to má být explicitně.
 - **Draft procesů, které ještě neexistují v realitě** — SOPka popisuje stávající
