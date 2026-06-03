@@ -1,7 +1,7 @@
 ---
 id: SOP-ACC-T003
 name: "Energie – zpracování energetických dokladů (zálohy, vyúčtování, zápočty)"
-version: 0.1.0
+version: 0.2.0
 status: draft
 owner: petr@yeast-group.cz
 business_owner: petr.kvasnica@yeast-group.cz
@@ -10,7 +10,6 @@ tenant:
   type: template
   parameterized:
     - energy_vendor_ico_whitelist
-    - om_to_stredisko_map
     - account_map
 last_reviewed: 2026-06-03
 reviewed_by: petr@yeast-group.cz
@@ -55,6 +54,7 @@ success_criteria:
   - no_overpayment_booked_as_positive_payable
   - vat_reconciles_or_held
   - subject_matched_by_8digit_ico
+  - no_vat_deduction_on_advance_docs
 tags:
   - energie
   - dph
@@ -106,8 +106,7 @@ různé zákaznické účty), takže párování jen na subjekt (IČ) nestačí 
 - **OCR text dokladu** — pro deterministickou detekci sub-typu (klíčová slova).
 - **`energy_vendor_ico_whitelist`** *(tenant param)* — IČ energetických dodavatelů (PPAS 60193492,
   PRE 60193913, innogy 49903209, EP ENERGY 27386643, ČEZ Prodej 27232433, E.ON 26078201, …).
-- **`om_to_stredisko_map`** *(tenant param)* — mapování odběrné místo (EAN / smluvní účet) → nemovitost / středisko.
-- **`account_map`** *(tenant param)* — účtová osnova (502/504 spotřeba, 314 poskytnuté zálohy per OM, 343 DPH, 321 závazek, 311/315 pohledávka).
+- **`account_map`** *(tenant param)* — účtová osnova (502/504 spotřeba, 314 poskytnuté zálohy u plátce, 343 DPH, 321 závazek, 311/315 pohledávka). Bez střediskové analytiky.
 
 ## Preconditions
 
@@ -147,11 +146,11 @@ o sobě nerozhoduje** — rozhoduje přítomnost základu daně + DPH + DUZP.
 
 **On failure / nejistota:** → `vyuctovani` (drženo) — radši false-positive review než chybné auto.
 
-### 3. Odběrné místo (OM) → nemovitost / středisko
+### 3. Párování subjektu (BEZ per-OM — rozhodnutí 2026-06-03)
 
-- Subjekt (s.r.o.) **výhradně přes 8místné IČ**. Zákaznický/smluvní účet (10 číslic) **NENÍ IČ** → odmítnout.
-- OM přes **EAN** (primární) → fallback smluvní/zákaznický účet → fallback adresa+jednotka, mapuj přes `om_to_stredisko_map`.
-- Zálohový účet 314 je veden **per OM** (ne per s.r.o.), aby zápočet ve vyúčtování sedl.
+- Subjekt (s.r.o.) **výhradně přes 8místné IČ**. Zákaznický/smluvní účet (10 číslic) **NENÍ IČ** → odmítnout (jinak hrozí špatný/žádný match).
+- **Žádné odběrné místo, žádné středisko.** Všechny doklady daného s.r.o. se vážou na ten s.r.o.
+- Zálohový účet 314 (u plátce) veden per s.r.o.+dodavatel, ne per OM.
 
 ### 4. Handling per sub-typ
 
@@ -159,13 +158,13 @@ o sobě nerozhoduje** — rozhoduje přítomnost základu daně + DPH + DUZP.
 
 - **`predpis_zaloh` / `uvitaci_dopis`** → 0 účetních dokladů. Extrahovat celou tabulku plánu
   (N řádků: částka + splatnost), založit `plan_zaloh(om_id, radky[])`. `total` NIKDY jako závazek.
-- **`zalohovy_danovy_doklad`** → 1 doklad, rozdělit total na základ+DPH, odpočet DPH MD 343 / D 314,
-  DUZP = datum přijetí úplaty, do KH. `due_date=null` + „Neplaťte" → negenerovat příkaz.
-- **`vyuctovani`** → 1 doklad. Sečíst **celou daňovou rekapitulaci** (komodita + distribuce + stálý plat),
-  ne jeden dílčí řádek. Je-li „zúčtované zálohy" ≠ 0 → zápočet záloh (314) + **anti-dvojí-odpočet**
-  (doodpočítat jen rozdíl DPH spotřeba − DPH už uplatněná na zálohách).
-- **`vyuctovani_konecne`** → směr = **pohledávka** (přeplatek 311/315), ne závazek. NEbrat `total` verbatim.
-  Uzavřít zálohový účet OM. Znaménka DPH mohou být záporná.
+- **`zalohovy_danovy_doklad`** → záloha, **BEZ odpočtu DPH** (rozhodnutí: odpočet až ve vyúčtování).
+  Eviduje se jako poskytnutá záloha (314 u plátce); `due_date=null` + „Neplaťte" → negenerovat příkaz.
+- **`vyuctovani`** → 1 doklad. **Neplátce (většina s.r.o.) → brutto bez DPH** (žádný odpočet — existující path).
+  **Plátce → DPH z celé spotřeby** (sečíst celou daňovou rekapitulaci, ne jeden řádek); protože ze záloh se
+  neodpočítávalo, **nehrozí dvojí odpočet**. Je-li „zúčtované zálohy" ≠ 0 → zápočet záloh (314).
+- **`vyuctovani_konecne`** → směr = **pohledávka** (přeplatek 311/315), ne závazek. NEbrat `total` verbatim
+  (to je mezisoučet spotřeby). Přeplatek se **páruje automaticky v bance**. Uzavřít zálohový účet.
 - **`zapocet`** → 0 nákladových dokladů; 1 zápočtový zápis MD 321 / D 311(315), linkovat na původní doklady.
 
 ### 5. Human approval gate
@@ -201,14 +200,14 @@ zalohovy_danovy_doklad, zapocet} **nebo** detekován přeplatek **nebo** DPH nes
 - `vat_reconciles_or_held` — buď Σ(DPH pásma) == total (±1 Kč), nebo doklad držen.
 - `subject_matched_by_8digit_ico` — odběratel napárován jen přes platné 8místné IČ.
 
-## TODO — rozhodnutí účetní / Petr (blokují P1/P2)
+## Rozhodnutí (Petr, 2026-06-03)
 
-- [ ] **Účtová osnova energií** — 502 vs 504 (plyn/elektřina), 314 per OM, 343, 321, 311 vs 315 pro přeplatky.
-- [ ] **Odpočet DPH ze záloh** — průběžně ze zálohových daňových dokladů, nebo až ve vyúčtování? (řídí anti-dvojí-odpočet logiku)
-- [ ] **Plán záloh** — vede ho FlexiBee (otevřené předpisy), nebo jen evidenčně + zálohy z bankovního výpisu?
-- [ ] **Přeplatky / B-poukázky** — účtovat jako pohledávku a čekat na vratku? jak párovat B-poukázku?
-- [ ] **Středisková alokace** — náklad per OM/jednotka, nebo stačí per s.r.o.?
-- [ ] **Energetická daň** (daň z plynu/elektřiny) — samostatný účet, nebo součást nákladu?
+- **Per odběrné místo: NE.** Párovat pouze na subjekt (s.r.o.) přes IČ. Jeden s.r.o. = jedna úroveň, žádný OM model. *(Důvod: per-OM by bylo neúnosně složité.)*
+- **Střediska: NE.** Žádná středisková alokace.
+- **Odpočet DPH ze záloh: NE — až ve vyúčtování.** Zálohové doklady (předpis i zálohový daňový doklad) se **NEodpočítávají**. Většina s.r.o. je **neplátce DPH** → energetický doklad se účtuje **brutto bez DPH** (žádný odpočet). U plátce se DPH řeší **až ve vyúčtování** (z celé spotřeby) — protože ze záloh se nic neodpočítalo, **nehrozí dvojí odpočet** (anti-dvojí-odpočet logika tedy NENÍ potřeba).
+- **Plán záloh: nahazovat dle dokladu na celé období** — z předpisu vytvořit N záznamů záloh pokrývajících období (bez DPH).
+- **Přeplatky: párují se automaticky v bance.** Jen zaevidovat. **B-poukázky = omyl, bude opraveno** → neřešit.
+- **Energetická daň: NEúčtovat zvlášť** — je součást ceny/nákladu na energie (502/504); odvádí ji dodavatel. Realitní firma = spotřebitel.
 
 ## Role mapping
 
@@ -217,4 +216,5 @@ zalohovy_danovy_doklad, zapocet} **nebo** detekován přeplatek **nebo** DPH nes
 
 ## Changelog
 
-- 2026-06-03 — v0.1.0 — initial draft z sandbox analýzy TAF Estate (P0 safety implementováno, P1/P2 + účetní rozhodnutí TODO) (petr@yeast-group.cz)
+- 2026-06-03 — v0.2.0 — účetní rozhodnutí Petr: bez per-OM a bez středisek (jen subjekt přes IČ); odpočet DPH až ve vyúčtování (zálohy bez odpočtu → odpadá anti-dvojí-odpočet); většina s.r.o. neplátci → vyúčtování brutto; plán záloh = N záznamů na období; přeplatky párované v bance, B-poukázky zrušeny; energetická daň součást nákladu (petr@yeast-group.cz)
+- 2026-06-03 — v0.1.0 — initial draft z sandbox analýzy TAF Estate (P0 safety implementováno) (petr@yeast-group.cz)
