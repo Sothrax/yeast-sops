@@ -1,7 +1,7 @@
 ---
 id: SOP-ITOPS-T001
 name: "RB konektor – onboarding firmy/účtu do bank-feedu (OP cert → CMA → feed)"
-version: 0.2.0
+version: 0.3.0
 status: draft
 owner: petr@yeast-group.cz
 business_owner: petr.kvasnica@yeast-group.cz
@@ -103,7 +103,11 @@ nechytí) — proto se firma + bank kod nesou explicitně a validují dry-runem.
 
 - [ ] Cert je v OP (`op item get _rb_client_<firma> --vault Cortex-RB-Keys` → 2 PEM soubory). **Nikdy netiskni hodnoty.**
 - [ ] FlexiBee firma DB existuje (`flexi_list_companies` → ověř slug).
-- [ ] V FlexiBee firmě existuje `bankovni-ucet` záznam pro daný RB účet (jinak je nutné ho založit dřív).
+- [ ] V FlexiBee firmě existuje `bankovni-ucet` s kódem `RB_<účet>` pro daný RB účet. **BLOKER:** nová firma má
+  jen default placeholder (`kod="BANKOVNÍ ÚČET"`, prázdný IBAN); správný záznam (`kod`=`nazev`=`RB_<účet>`, IBAN,
+  `buc`=číslo, banka 5500) **musí ručně založit účetní ve FlexiBee** — přes MCP to NELZE (`bankovni-ucet` není
+  flexi_upsert agenda). RB čísla účtů pro něj dodáš z kroku 6 (lze tedy předřadit: aktivuj cert → vytáhni účty →
+  účetní založí bankovni-ucet → pak feed). Bez přesného kódu feed nepáruje (krok 7).
 - [ ] Máš heslo pro nový `.p12` (zvolíš při exportu) a `op://Cortex-Platform/mcp-rb-cma-admin/password` (CMA admin-key).
 - [ ] Pro aktivaci: lidská OIDC identita se scope `rb:activate` (přístup do cortex-ui Console).
 
@@ -111,12 +115,21 @@ nechytí) — proto se firma + bank kod nesou explicitně a validují dry-runem.
 
 ### 1. Stáhni PEM z OP a slož do .p12  *(Tier 1 / ops)*
 
+> **Kde to dělat:** `op` vidí vaulty `Cortex-RB-Keys`/`Cortex-Platform` **jen na Macu** (service account na
+> controlu je omezený a nevidí je) → celý cert+CMA flow běž **z Macu**, na CMA sáhni přes SSH tunel (krok 2).
+
 ```bash
 D=$(mktemp -d)
-op read "op://Cortex-RB-Keys/_rb_client_<firma>/<firma>_client-cert.pem" --out-file "$D/cert.pem"
-op read "op://Cortex-RB-Keys/_rb_client_<firma>/<firma>_client-key.pem"  --out-file "$D/key.pem"
+# Názvy PEM souborů se LIŠÍ (např. pivovarska-12_client-cert.pem) → vytáhni reálné, ne <firma>_…:
+ITEM=_rb_client_<firma>
+FILES=$(op item get "$ITEM" --vault Cortex-RB-Keys --format json | jq -r '.files[].name')
+CERTF=$(echo "$FILES" | grep -i cert | head -1); KEYF=$(echo "$FILES" | grep -i key | head -1)
+op read "op://Cortex-RB-Keys/$ITEM/$CERTF" --out-file "$D/cert.pem"
+op read "op://Cortex-RB-Keys/$ITEM/$KEYF"  --out-file "$D/key.pem"
+# IČ rovnou z certu (do kroku 2): NTRCZ-<ico>
+ICO=$(openssl x509 -in "$D/cert.pem" -noout -subject -nameopt sep_multiline,utf8 | grep -iE "organizationIdentifier|2\.5\.4\.97" | grep -oE "[0-9]{6,}" | head -1)
 # POZOR: OpenSSL 3 default (AES) forge/Go pkcs12 parser NEPŘEČTE → MUSÍ -legacy
-openssl pkcs12 -export -legacy -inkey "$D/key.pem" -in "$D/cert.pem" -out "$D/<firma>.p12" -passout pass:'<P12_PASS>'
+openssl pkcs12 -export -legacy -inkey "$D/key.pem" -in "$D/cert.pem" -out "$D/<firma>.p12" -passout pass:"$(openssl rand -hex 12)"
 ```
 **On failure:** špatný PEM/klíč → `openssl pkcs12` selže; ověř, že cert a key tvoří pár
 (`openssl x509 -noout -modulus -in cert.pem | openssl md5` == `openssl rsa -noout -modulus -in key.pem | openssl md5`).
@@ -125,14 +138,20 @@ Po dokončení `shred`/smaž `$D`.
 ### 2. CMA: vytvoř firmu (idempotentní na slug)  *(Tier 1)*
 
 ```bash
-kubectl -n mcp port-forward svc/mcp-rb 15211:5211 &          # CMA je interní-only
-ADMIN=$(op read "op://Cortex-Platform/mcp-rb-cma-admin/password")
-curl -sS -X POST localhost:15211/cma/v1/resources/companies \
-  -H "X-CMA-Admin-Key: $ADMIN" -H 'Content-Type: application/json' \
-  -d '{"slug":"<firma-slug>","displayName":"<Název s.r.o.>","ico":"<IČO>"}'
+# CMA je interní-only (ClusterIP). Z Macu tuneluj přes control na mcp-rb ClusterIP:5211:
+ssh -f -N -L 15211:10.43.213.52:5211 claude@yeast-cortex-control
+# admin-key NIKDY netiskni — ber přes curl config file (mimo argv/ps):
+CFG=$(mktemp); chmod 600 "$CFG"; printf 'header = "X-CMA-Admin-Key: %s"\n' "$(op read 'op://Cortex-Platform/mcp-rb-cma-admin/password')" > "$CFG"
+curl -sS -K "$CFG" -X POST localhost:15211/cma/v1/resources/companies \
+  -H 'Content-Type: application/json' \
+  -d "{\"slug\":\"<firma-slug>\",\"displayName\":\"<Název s.r.o.>\",\"ico\":\"$ICO\",\"clientGroup\":\"<group>\"}"
 # -> vrátí company id (uuid). 409 = slug už existuje (reuse).
+# Kontrola existujících:  curl -K "$CFG" "localhost:15211/cma/v1/resources/companies?size=200"
+#   (klíč odpovědi = "items", NE "data"; size>200 -> HTTP 400)
+# Po práci: shred -u "$CFG"
 ```
-slug = lowercase `[a-z0-9_-]`, shodný s cert názvem (`_rb_client_<slug>`). `ico` = IČ firmy (NTRCZ-<ico> na certu).
+slug = lowercase `[a-z0-9_-]`, shodný s cert názvem (`_rb_client_<slug>`). `ico` z kroku 1 (NTRCZ-<ico> na certu).
+**`clientGroup` nastav správně** — řídí pokrytí feed klíčem (krok 8) i `RB_KEY_<GROUP>` (krok 9).
 
 ### 3. CMA: nahraj .p12 → PENDING cert  *(Tier 1)*
 
@@ -155,6 +174,10 @@ identita se scope `rb:activate` (single strong approver, `RB_ACTIVATE_APPROVERS=
 - **Nepokračovat** dál, dokud cert není ACTIVE.
 - Gotcha: Authentik `rb:activate` scope mapping musí reálně vracet `{"scp":["rb:activate","cma:read","cma:write"]}`,
   audience = OAuth client_id; jinak 403 INSUFFICIENT_SCOPE.
+- Pozn.: od **cortex-ui 0.1.14** (`slugFromSubject` fix — odvozuje per-company slug z názvu, ne z tenantSlug)
+  zakládá Console firmu se správným slugem → **celý cert lifecycle (create+upload+activate) lze udělat čistě
+  v Console**; kroky 2–3 přes API jsou alternativa (např. pro hromadné napojení). Před 0.1.14 Console tvořil
+  per-tenant kolize (mislabel `yeastfin`).
 
 ### 5. Ověř cert test-callem  *(Tier 1)*
 
@@ -187,9 +210,12 @@ názvy: `code:RB_<acct>` (běžný), `code:RB_SPOR_<acct>` (spořicí) — ale f
 
 ### 8. Ověř/dodej feed consumer key allowedCompanies  *(Tier 1)*
 
-`RB_KEY_<GROUP>` je scoped `rbk_` consumer key; jeho `allowedCompanies` MUSÍ obsahovat nový slug.
-Pokud firma jde do existující group (např. `taf-estate`), ověř/dodej slug do allowedCompanies daného
-consumera (CMA `/cma/v1/consumers`); jinak feed dostane 403 na X-Company.
+`RB_KEY_<GROUP>` je scoped `rbk_` consumer key. Zkontroluj jeho pokrytí:
+`curl -K "$CFG" localhost:15211/cma/v1/consumers?size=100` → consumer skupiny (`bank-feed-<group>`) →
+`keys[].allowedGroups` / `allowedCompanies`. Dvě varianty:
+- **`allowedGroups:["<group>"]`** (NÁŠ případ, např. `bank-feed-taf-estate`; `allowedCompanies` prázdné) →
+  firma s `clientGroup=<group>` z kroku 2 je **automaticky pokrytá, NIC nedoplňuj**.
+- **`allowedCompanies:[…]`** (per-slug) → musíš do klíče **dodat nový slug**, jinak feed dostane 403 na X-Company.
 
 ### 9. Přidej do bank_feed.py ACCOUNTS  *(Tier 1)*
 
@@ -285,3 +311,8 @@ Joby uklidí `ttlSecondsAfterFinished`, nebo `kubectl delete job <name>`. *(Reá
 - 0.1.0 (2026-06-28) — první verze; z reconu mcp-rb CMA + bank_feed.py při onboardingu 5 TAF firem.
 - 0.2.0 (2026-06-28) — přidán krok 12 „Backfill historie účtu" (jednorázový Job z cronjobu, max 88 dní,
   `FEED_DAYS/FEED_ONLY/FEED_SRC/FEED_DRY`, idempotentní cisObj dedup); ověřeno na 5 TAF firmách (65 pohybů).
+- 0.3.0 (2026-06-28) — kontrolní opravy z ostrého běhu: (1) krok 8 = feed klíč pokrývá přes `allowedGroups`
+  (clientGroup), ne nutně per-company `allowedCompanies`; (2) precondition `bankovni-ucet` = ruční FlexiBee
+  blocker (přes MCP nelze); (3) krok 1 = vytáhni reálné názvy PEM + IČ z certu; (4) CMA přes SSH tunel z Macu
+  (op vidí vaulty jen na Macu), companies list klíč `items`/`size<=200`, admin-key přes curl `-K` config.
+  Plus: od cortex-ui 0.1.14 jde cert lifecycle celý v Console.
